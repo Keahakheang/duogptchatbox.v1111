@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FairPrice Grocery Chat</title>
+  <style>
+    body {
+      max-width: 720px;
+      margin: 40px auto;
+      padding: 0 20px;
+      font-family: system-ui, sans-serif;
+      color: #18212b;
+      background: #f7f9fc;
+    }
+
+    #messages {
+      display: grid;
+      gap: 16px;
+      margin: 24px 0;
+    }
+
+    .message {
+      padding: 16px;
+      background: white;
+      border: 1px solid #dde3eb;
+      border-radius: 12px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .user {
+      background: #e8f1ff;
+    }
+
+    form {
+      display: flex;
+      gap: 8px;
+    }
+
+    input {
+      flex: 1;
+      min-width: 0;
+    }
+
+    input, button {
+      padding: 12px;
+      border: 1px solid #bbc7d6;
+      border-radius: 8px;
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      background: #1765c1;
+      color: white;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
+    li {
+      margin: 14px 0;
+    }
+
+    a {
+      color: #145bb0;
+    }
+
+    small {
+      color: #526174;
+    }
+  </style>
+</head>
+<body>
+  <h1>FairPrice Grocery Chat</h1>
+  <p>Ask about one product. Prices are retrieved from FairPrice product pages.</p>
+
+  <div id="messages" role="log" aria-live="polite"></div>
+
+  <form id="chat-form">
+    <input
+      id="question"
+      aria-label="Your grocery question"
+      placeholder="What is the price of strawberries?"
+      maxlength="500"
+      required
+    >
+    <button id="send" type="submit">Ask</button>
+  </form>
+
+  <script>
+    const form = document.querySelector("#chat-form");
+    const input = document.querySelector("#question");
+    const button = document.querySelector("#send");
+    const messages = document.querySelector("#messages");
+
+    const currency = new Intl.NumberFormat("en-SG", {
+      style: "currency",
+      currency: "SGD"
+    });
+
+    function addMessage(text, user = false) {
+      const element = document.createElement("div");
+      element.className = user ? "message user" : "message";
+      element.textContent = text;
+      messages.append(element);
+      return element;
+    }
+
+    function appendLink(parent, label, value) {
+      const url = new URL(value);
+
+      if (url.origin !== "https://www.fairprice.com.sg") {
+        return;
+      }
+
+      const link = document.createElement("a");
+      link.href = url.href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = label;
+      parent.append(link);
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const question = input.value.trim();
+
+      if (!question || button.disabled) {
+        return;
+      }
+
+      addMessage(question, true);
+      input.value = "";
+      button.disabled = true;
+
+      const reply = addMessage("Checking FairPrice…");
+
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: question })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || "Request failed.");
+        }
+
+        reply.textContent = data.answer;
+
+        if (data.products?.length) {
+          const list = document.createElement("ul");
+
+          for (const product of data.products) {
+            const item = document.createElement("li");
+
+            appendLink(item, product.name, product.url);
+            item.append(` — ${currency.format(product.price)}`);
+
+            if (product.availability) {
+              item.append(` (${product.availability})`);
+            }
+
+            const checked = document.createElement("small");
+            checked.textContent =
+              `Checked: ${new Date(product.checkedAt).toLocaleString()}`;
+
+            item.append(document.createElement("br"), checked);
+            list.append(item);
+          }
+
+          reply.append(list);
+        }
+
+        if (data.searchUrl) {
+          reply.append(document.createElement("br"));
+          appendLink(reply, "View FairPrice search results", data.searchUrl);
+        }
+      } catch (error) {
+        reply.textContent = error.message;
+      } finally {
+        button.disabled = false;
+        input.focus();
+        reply.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    });
+  </script>
+</body>
+</html>
